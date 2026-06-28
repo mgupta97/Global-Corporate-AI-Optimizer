@@ -362,6 +362,24 @@ The dashboard returns:
 
 ---
 
+
+---
+
+## Dashboard Demo
+
+### Dashboard Overview
+
+![Dashboard Overview](assets/dashboard_overview.png)
+
+### Optimized Portfolio View
+
+![Optimized Portfolio](assets/dashboard_portfolio.png)
+
+### Portfolio Charts
+
+![Portfolio Charts](assets/dashboard_charts.png)
+
+
 ## Visual Outputs
 
 The project generates the following visualizations:
