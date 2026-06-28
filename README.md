@@ -1,8 +1,14 @@
 # AI-Driven Global Corporate Portfolio Optimizer
 
-An AI and optimization project that uses the Forbes Global 2000 Companies 2026 dataset to build globally diversified corporate portfolios.
+![Python](https://img.shields.io/badge/Python-3.14-blue)
+![Streamlit](https://img.shields.io/badge/Streamlit-Dashboard-red)
+![Machine Learning](https://img.shields.io/badge/Machine%20Learning-KMeans-green)
+![Optimization](https://img.shields.io/badge/Optimization-PuLP-orange)
+![Status](https://img.shields.io/badge/Status-Complete-brightgreen)
 
-This project combines financial feature engineering, AI-style company scoring, machine learning clustering, constrained optimization, and an interactive Streamlit dashboard. The goal is to move beyond simple company rankings and build a decision system that selects companies under real-world diversification constraints.
+A machine learning and optimization project that builds globally diversified corporate portfolios using Forbes Global 2000 company data, financial scoring, KMeans clustering, constrained optimization, and an interactive Streamlit dashboard.
+
+**Core idea:** combine AI-style company scoring with operations research to select strong companies while controlling for country, industry, and company-type concentration.
 
 ---
 
