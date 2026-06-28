@@ -1,4 +1,5 @@
 import os
+import shutil
 import pandas as pd
 import pulp
 
@@ -9,11 +10,12 @@ OUTPUT_PATH = "outputs/optimized_portfolio.csv"
 
 def build_candidate_pool(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Filters out companies that may distort the optimizer:
-    - negative profit companies
-    - tiny companies with extreme ratios
-    - extreme profit margin outliers
-    Also guarantees that country is extracted correctly from headquarters.
+    Build a high-quality candidate pool for optimization.
+
+    Filters remove:
+    - Negative-profit companies
+    - Very small companies with distorted financial ratios
+    - Extreme margin or valuation outliers
     """
 
     df = df.copy()
@@ -52,6 +54,26 @@ def build_candidate_pool(df: pd.DataFrame) -> pd.DataFrame:
     return candidate_df
 
 
+def get_solver():
+    """
+    Use system CBC if available.
+    Otherwise fall back to PuLP's bundled CBC solver.
+
+    This makes the optimizer more portable across:
+    - Local Mac setup
+    - GitHub users
+    - Streamlit deployment
+    - Linux environments
+    """
+
+    cbc_path = shutil.which("cbc")
+
+    if cbc_path:
+        return pulp.COIN_CMD(path=cbc_path, msg=False)
+
+    return pulp.PULP_CBC_CMD(msg=False)
+
+
 def optimize_portfolio(
     candidate_df: pd.DataFrame,
     portfolio_size: int = 25,
@@ -64,6 +86,11 @@ def optimize_portfolio(
     objective_col: str = "ai_company_strength_score"
 ) -> pd.DataFrame:
 
+    candidate_df = candidate_df.copy()
+
+    if objective_col not in candidate_df.columns:
+        raise ValueError(f"Objective column '{objective_col}' not found in candidate data.")
+
     n = len(candidate_df)
 
     model = pulp.LpProblem(
@@ -71,18 +98,23 @@ def optimize_portfolio(
         pulp.LpMaximize
     )
 
-    # Decision variable: select company or not
+    # Decision variable: 1 if company is selected, 0 otherwise
     x = pulp.LpVariable.dicts("select_company", range(n), cat="Binary")
 
     countries = candidate_df["country"].unique().tolist()
     industries = candidate_df["industry"].unique().tolist()
-    clusters = candidate_df["company_cluster"].unique().tolist()
-    # Binary variables for whether a country/industry is represented
+
+    has_cluster_column = "company_cluster" in candidate_df.columns
+    clusters = candidate_df["company_cluster"].unique().tolist() if has_cluster_column else []
+
+    # Binary variables for represented countries, industries, and clusters
     y_country = pulp.LpVariable.dicts("country_used", countries, cat="Binary")
     y_industry = pulp.LpVariable.dicts("industry_used", industries, cat="Binary")
-    y_cluster = pulp.LpVariable.dicts("cluster_used", clusters, cat="Binary")
 
-    # Objective: maximize AI strength score
+    if has_cluster_column:
+        y_cluster = pulp.LpVariable.dicts("cluster_used", clusters, cat="Binary")
+
+    # Objective: maximize selected score
     model += pulp.lpSum(
         candidate_df.loc[i, objective_col] * x[i]
         for i in range(n)
@@ -108,35 +140,39 @@ def optimize_portfolio(
         model += pulp.lpSum(x[i] for i in idx) >= y_industry[industry]
 
     # Cluster constraints
-    for cluster in clusters:
-        idx = candidate_df[candidate_df["company_cluster"] == cluster].index.tolist()
+    if has_cluster_column:
+        for cluster in clusters:
+            idx = candidate_df[candidate_df["company_cluster"] == cluster].index.tolist()
 
-        model += pulp.lpSum(x[i] for i in idx) <= max_per_cluster
-        model += pulp.lpSum(x[i] for i in idx) <= len(idx) * y_cluster[cluster]
-        model += pulp.lpSum(x[i] for i in idx) >= y_cluster[cluster]
-    
+            model += pulp.lpSum(x[i] for i in idx) <= max_per_cluster
+            model += pulp.lpSum(x[i] for i in idx) <= len(idx) * y_cluster[cluster]
+            model += pulp.lpSum(x[i] for i in idx) >= y_cluster[cluster]
+
     # Diversification constraints
     model += pulp.lpSum(y_country[c] for c in countries) >= min_countries
     model += pulp.lpSum(y_industry[ind] for ind in industries) >= min_industries
-    model += pulp.lpSum(y_cluster[cluster] for cluster in clusters) >= min_clusters
 
-    solver = pulp.COIN_CMD(
-        msg=False,
-        path = "/opt/homebrew/bin/cbc"
-    )
+    if has_cluster_column:
+        model += pulp.lpSum(y_cluster[c] for c in clusters) >= min_clusters
+
+    solver = get_solver()
     model.solve(solver)
 
     status = pulp.LpStatus[model.status]
     print(f"\nOptimization status: {status}")
 
     if status != "Optimal":
-        raise RuntimeError("Optimization did not find an optimal solution. Try relaxing constraints.")
+        raise RuntimeError(
+            "Optimization did not find an optimal solution. "
+            "Try relaxing constraints such as minimum countries, minimum industries, "
+            "minimum clusters, or maximum companies per country/industry/cluster."
+        )
 
     selected_indices = [i for i in range(n) if x[i].value() == 1]
 
     optimized_portfolio = candidate_df.loc[selected_indices].copy()
     optimized_portfolio = optimized_portfolio.sort_values(
-        "ai_company_strength_score",
+        objective_col,
         ascending=False
     )
 
@@ -146,30 +182,41 @@ def optimize_portfolio(
 
 
 def print_portfolio_summary(portfolio: pd.DataFrame) -> None:
+    display_cols = [
+        "ai_rank",
+        "rank",
+        "company",
+        "country",
+        "industry",
+    ]
+
+    if "cluster_label" in portfolio.columns:
+        display_cols.append("cluster_label")
+
+    display_cols += [
+        "sales_b",
+        "profit_b",
+        "market_value_b",
+        "profit_margin",
+        "ai_company_strength_score",
+    ]
+
+    if "scenario_score" in portfolio.columns:
+        display_cols.append("scenario_score")
+
+    display_cols.append("portfolio_weight")
+
     print("\nOptimized Portfolio:")
-    print(
-        portfolio[
-            [
-                "ai_rank",
-                "rank",
-                "company",
-                "country",
-                "industry",
-                "cluster_label",
-                "sales_b",
-                "profit_b",
-                "market_value_b",
-                "profit_margin",
-                "ai_company_strength_score",
-                "portfolio_weight"
-            ]
-        ].to_string(index=False)
-    )
+    print(portfolio[display_cols].to_string(index=False))
 
     print("\nPortfolio Summary:")
     print(f"Companies selected: {len(portfolio)}")
     print(f"Countries represented: {portfolio['country'].nunique()}")
     print(f"Industries represented: {portfolio['industry'].nunique()}")
+
+    if "cluster_label" in portfolio.columns:
+        print(f"Clusters represented: {portfolio['cluster_label'].nunique()}")
+
     print(f"Average AI score: {portfolio['ai_company_strength_score'].mean():.4f}")
     print(f"Total sales: ${portfolio['sales_b'].sum():,.2f}B")
     print(f"Total profit: ${portfolio['profit_b'].sum():,.2f}B")
@@ -182,8 +229,10 @@ def print_portfolio_summary(portfolio: pd.DataFrame) -> None:
     print("\nIndustry Exposure:")
     print(portfolio["industry"].value_counts().to_string())
 
-    print("\nCluster Exposure:")
-    print(portfolio["cluster_label"].value_counts().to_string())
+    if "cluster_label" in portfolio.columns:
+        print("\nCluster Exposure:")
+        print(portfolio["cluster_label"].value_counts().to_string())
+
 
 def main():
     df = pd.read_csv(INPUT_PATH)
