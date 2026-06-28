@@ -12,6 +12,12 @@ A machine learning and optimization project that builds globally diversified cor
 
 ---
 
+## Live Demo
+
+Try the deployed Streamlit dashboard here:
+
+[Open Live App](https://global-corporate-ai-optimizer-lyece6keujzumvhfsjo4pp.streamlit.app/)
+
 ## Project Objective
 
 The main question behind this project is:
